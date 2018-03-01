@@ -41,8 +41,17 @@ AC_ARG_WITH(cuda,
 	[cuda_dir="${withval}"], [cuda_dir=''])
 if test "x$cuda_dir" != "x"; then
   DYNET_CPPFLAGS="-I${dynet_dir} -I${cuda_dir}/include -DHAVE_CUDA -DEIGEN_USE_GPU -DEIGEN_HAS_CUDA_FP16"
-  DYNET_LDFLAGS="-L${dynet_dir}/build/dynet/ -ldynet -L${cuda_dir}/lib -L${cuda_dir}/lib64 -lcudart -lcublas"
+  DYNET_LDFLAGS="-L${dynet_dir}/build/dynet/ -lgdynet -L${cuda_dir}/lib -L${cuda_dir}/lib64 -lcudart -lcublas"
+  CUDA_CFLAGS="-I$with_cuda/include"
+  CUDA_LIBS="-lcudart"
+  CUDA_LDFLAGS="-L$with_cuda/lib$SUFFIX"
+  NVCC="$with_cuda/bin/nvcc"
 fi
+AC_SUBST(CUDA_CFLAGS)
+AC_SUBST(CUDA_LIBS)
+AC_SUBST(CUDA_LDFLAGS)
+AC_SUBST(NVCC)
+
 AC_SUBST(DYNET_CPPFLAGS)
 AC_SUBST(DYNET_LDFLAGS)
 
@@ -73,6 +82,11 @@ AC_LANG([C++])
 AC_CHECK_HEADERS([tr1/unordered_map])
 AC_CHECK_HEADERS([ext/hash_map])
 CXXFLAGS="$CXXFLAGS -std=c++0x"
+
+AC_ARG_VAR([NVCC], [nvcc compiler to use])
+AC_PATH_PROG([NVCC], [nvcc], [no])
+working_nvcc=no
+AM_CONDITIONAL([WORKING_NVCC], [test "x$working_nvcc" = "xyes"])
 
 # Check if we have rt/boost
 AX_BOOST_BASE([1.49], , AC_MSG_ERROR([Boost 1.49 or later is required]))

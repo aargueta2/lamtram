@@ -1,4 +1,6 @@
 ####### Library info
+binaryCuda_LINK = $(CC) $(binaryCuda_CFLAGS) $(CFLAGS) \
+ $(binaryCuda_LDFLAGS) $(LDFLAGS) -o $@
 
 LIBCPP = \
     lamtram-train.cc \
@@ -39,7 +41,8 @@ LIBCPP = \
     eval-measure-ribes.cc \
     eval-measure-wer.cc \
     eval-measure-interp.cc \
-    eval-measure.cc
+    eval-measure.cc \
+    kernels.cu
 
 AM_CXXFLAGS = $(BOOST_CPPFLAGS) $(EIGEN_CPPFLAGS) $(DYNET_CPPFLAGS) $(OPENMP_CXXFLAGS) -I$(srcdir)/..
 
@@ -53,6 +56,7 @@ liblamtram_la_LDFLAGS = -version-info 0:0:0
 LDADD=liblamtram.la \
     $(DYNET_LDFLAGS) \
     $(BOOST_LDFLAGS) \
+    $(CUDA_LDFLAGS) \
     $(BOOST_SYSTEM_LIB) \
     $(BOOST_PROGRAM_OPTIONS_LIB) \
     $(BOOST_SERIALIZATION_LIB) \
@@ -65,7 +69,7 @@ lamtram_train_SOURCES = lamtram-train-main.cc
 lamtram_train_LDADD = $(LDADD)
 
 lamtram_SOURCES = lamtram-main.cc
-lamtram_LDADD = $(LDADD)
+lamtram_LDADD = $(LDADD) $(CUDA_LIBS)
 
 dist_train_SOURCES = dist-train-main.cc
 dist_train_LDADD = $(LDADD)

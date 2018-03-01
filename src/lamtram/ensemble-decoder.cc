@@ -4,6 +4,13 @@
 #include <boost/range/irange.hpp>
 #include <cfloat>
 
+//Custom libraries
+#include "cuda.h"
+#include "cuda_runtime.h"
+#include <thrust/sort.h>
+#include <thrust/execution_policy.h>
+#include "lamtram/kernels.h"
+
 using namespace lamtram;
 using namespace std;
 using namespace dynet;
@@ -218,6 +225,16 @@ EnsembleDecoderHypPtr EnsembleDecoder::Generate(const Sentence & sent_src) {
 
 std::vector<EnsembleDecoderHypPtr> EnsembleDecoder::GenerateNbest(const Sentence & sent_src, int nbest_size) {
 
+  float total_elapsed_sort_time = 0;
+  //Start counting the time spent in this function
+  float elapsed=0;
+  cudaEvent_t start_time, stop_time;
+  cudaEventCreate(&start_time);
+  cudaEventCreate(&stop_time);
+  cudaEventRecord(start_time, 0);
+
+
+  //cout << "THE SENTENCE LENGTH IS " << sent_src.size() << endl;
   // First initialize states
   ComputationGraph cg;
   for(auto & tm : encdecs_) tm->NewGraph(cg);
@@ -241,6 +258,7 @@ std::vector<EnsembleDecoderHypPtr> EnsembleDecoder::GenerateNbest(const Sentence
   for(int sent_len = 0; sent_len <= size_limit_; sent_len++) {
     // This vector will hold the best IDs
     vector<tuple<float,int,int,int> > next_beam_id(beam_size_+1, tuple<float,int,int,int>(-DBL_MAX,-1,-1,-1));
+
     // Go through all the hypothesis IDs
     for(int hypid = 0; hypid < (int)curr_beam.size(); hypid++) {
       EnsembleDecoderHypPtr curr_hyp = curr_beam[hypid];
@@ -261,12 +279,11 @@ std::vector<EnsembleDecoderHypPtr> EnsembleDecoder::GenerateNbest(const Sentence
         THROW_ERROR("Bad ensembling operation: " << ensemble_operation_ << endl);
       }
       // Add the word/unk penalty
-      vector<float> softmax = as_vector(cg.incremental_forward(i_logprob));
-      if(word_pen_ != 0.f) {
-        for(size_t i = 1; i < softmax.size(); i++)
-          softmax[i] += word_pen_;
-      }
-      if(unk_id_ >= 0) softmax[unk_id_] += unk_pen_ * unk_log_prob_;
+      Tensor softmax_tensor = cg.incremental_forward(i_logprob);
+
+      float* softmax_tensor_values = softmax_tensor.v;
+
+ 
       // Find the best aligned source, if any alignments exists
       WordId best_align = -1;
       if(i_aligns.size() != 0) {
@@ -277,14 +294,59 @@ std::vector<EnsembleDecoderHypPtr> EnsembleDecoder::GenerateNbest(const Sentence
           if(align[aid] > align[best_align])
             best_align = aid;
       }
+
+
+
+    float elapsed_sort=0;
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+    cudaEventRecord(start, 0);
+    float curr_hyp_obtained_score = curr_hyp->GetScore();
+
+      vector<float> softmax = as_vector(softmax_tensor);
+      //cout << "The size of the softmax is " << softmax.size() << " and hypid " << hypid << endl;
+
+      if(word_pen_ != 0.f) {
+        for(size_t i = 1; i < softmax.size(); i++)
+          softmax[i] += word_pen_;
+      }
+      if(unk_id_ >= 0) softmax[unk_id_] += unk_pen_ * unk_log_prob_;
+
+
+    
       // Find the best IDs
       for(int wid = 0; wid < (int)softmax.size(); wid++) {
-        float my_score = curr_hyp->GetScore() + softmax[wid];
+        float my_score = curr_hyp_obtained_score + softmax[wid];
         for(bid = beam_size_; bid > 0 && my_score > std::get<0>(next_beam_id[bid-1]); bid--)
           next_beam_id[bid] = next_beam_id[bid-1];
         next_beam_id[bid] = tuple<float,int,int,int>(my_score,hypid,wid,best_align);
       }
+
+    //Step 1: update the softmax on the device
+
+    //sort_list(softmax_tensor_values, (int)softmax.size());
+    //Step 2: perform the sort
+
+
+    //Step 3: copy the required information only
+
+
+
+    cudaEventRecord(stop, 0);
+    cudaEventSynchronize (stop);
+    cudaEventElapsedTime(&elapsed_sort, start, stop);
+    cudaEventDestroy(start);
+    cudaEventDestroy(stop);
+    total_elapsed_sort_time += elapsed_sort;
+/*
+    printf("The elapsed time to sort was %.2f ms\n", elapsed_sort);
+*/
+
     }
+    //TODO: End pseudo-sort section
+
+    //cout << "The size of the next_beam id is " << next_beam_id.size() << endl;
     // Create the new hypotheses
     vector<EnsembleDecoderHypPtr> next_beam;
     for(int i = 0; i < beam_size_; i++) {
@@ -303,16 +365,35 @@ std::vector<EnsembleDecoderHypPtr> EnsembleDecoder::GenerateNbest(const Sentence
         nbest.push_back(hyp);
       next_beam.push_back(hyp);
     }
+
     curr_beam = next_beam;
     // Check if we're done with search
     if(nbest.size() != 0) {
+ //     cout << "THE SORT SIZE IS " << nbest.size() << endl;
       sort(nbest.begin(), nbest.end());
       if(nbest.size() > nbest_size)
         nbest.resize(nbest_size);
-      if(nbest.size() == nbest_size && (next_beam.size() == 0 || (*nbest.rbegin())->GetScore() >= next_beam[0]->GetScore()))
+      if(nbest.size() == nbest_size && (next_beam.size() == 0 || (*nbest.rbegin())->GetScore() >= next_beam[0]->GetScore())){
+
+        cudaEventRecord(stop_time, 0);
+        cudaEventSynchronize (stop_time);
+        cudaEventElapsedTime(&elapsed, start_time, stop_time);
+        cudaEventDestroy(start_time);
+        cudaEventDestroy(stop_time);
+        printf("The elapsed time on the gpu was %.2f ms and sort %.2f ms\n", elapsed,total_elapsed_sort_time);
+
         return nbest;
+      }
     }
   }
+
+  cudaEventRecord(stop_time, 0);
+  cudaEventSynchronize (stop_time);
+  cudaEventElapsedTime(&elapsed, start_time, stop_time);
+  cudaEventDestroy(start_time);
+  cudaEventDestroy(stop_time);
+  printf("The elapsed time on the gpu was %.2f ms and sort %.2f ms\n", elapsed,total_elapsed_sort_time);
+
   cerr << "WARNING: Generated sentence size exceeded " << size_limit_ << ". Truncating." << endl;
   return nbest;
   // return vector<EnsembleDecoderHypPtr>(0);
