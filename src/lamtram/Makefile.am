@@ -1,4 +1,5 @@
 ####### Library info
+include $(top_srcdir)/cuda.mk
 binaryCuda_LINK = $(CC) $(binaryCuda_CFLAGS) $(CFLAGS) \
  $(binaryCuda_LDFLAGS) $(LDFLAGS) -o $@
 
@@ -66,10 +67,10 @@ LDADD=liblamtram.la \
 bin_PROGRAMS = lamtram-train lamtram dist-train
 
 lamtram_train_SOURCES = lamtram-train-main.cc
-lamtram_train_LDADD = $(LDADD)
+lamtram_train_LDADD = $(LDADD) $(CUDA_LIBS)
 
 lamtram_SOURCES = lamtram-main.cc
 lamtram_LDADD = $(LDADD) $(CUDA_LIBS)
 
 dist_train_SOURCES = dist-train-main.cc
-dist_train_LDADD = $(LDADD)
+dist_train_LDADD = $(LDADD) $(CUDA_LIBS)
